@@ -1,0 +1,413 @@
+---
+title: "Week 5 Activity: Airline Delays"
+author: "Candace Grant"
+date: "2025-09-25"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+##### In this activity I will load a Postgres database file into R Studio. Then I will tidy the data so it follows the following conventions:
+- Each variable forms a column.
+- Each observation forms a row.
+- Each type of observational unit forms a table
+
+##### I will also create visializations to better enahnce data visulaization and understanding of the data.
+
+```{r}
+# Load libraries
+install.packages("ggplot")
+library(DBI)
+library(RPostgres)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Check that DBI loaded properly
+if (!exists("dbGetQuery")) {
+  stop("DBI package not loaded properly.")
+}
+
+# Connect using RPostgres
+con <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = "Data607",
+  host = "localhost",
+  port = 5432,
+  user = "postgres",
+  password = "admin%$509"
+)
+
+# Test if connection works:
+test_result <- dbGetQuery(con, "SELECT 1 as test")
+print("Connection test:")
+print(test_result)
+
+# Define the table name
+table_name <- "flight_performance"
+
+# Get all data from flight_performance table
+flight_data <- dbGetQuery(con, paste("SELECT * FROM", table_name))
+
+# Save to CSV
+write.csv(flight_data, "flight_performance.csv", row.names = FALSE)
+print("CSV file saved successfully!")
+
+```
+##### The data from Posgtres was successfully loaded into R Studio and saved as a CSV file in the format given in the assignment.
+
+##### Exploratory Analysis of Flight Performance Table 
+```{r}
+# 1. Get basic table info using SQL queries
+print("COLUMN NAMES AND TYPES:")
+columns_info <- dbGetQuery(con, paste0("
+  SELECT column_name, data_type 
+  FROM information_schema.columns 
+  WHERE table_name = '", table_name, "'
+  ORDER BY ordinal_position
+"))
+print(columns_info)
+
+# 2. Get total row count
+row_count <- dbGetQuery(con, paste("SELECT COUNT(*) as total_rows FROM", table_name))
+print(paste("TOTAL ROWS:", row_count$total_rows))
+
+# 3. Look at first 10 rows
+print("FIRST 10 ROWS:")
+sample_data <- dbGetQuery(con, paste("SELECT * FROM", table_name, "LIMIT 10"))
+print(sample_data)
+
+# 4. Basic data exploration
+print("COLUMN NAMES:")
+print(names(flight_data))
+
+print("DATA STRUCTURE:")
+str(flight_data)
+
+print("SUMMARY STATISTICS:")
+summary(flight_data)
+```
+##### Checks for missing data
+
+```{r}
+# Check for rows that are completely empty (all NA or empty values)
+empty_rows <- apply(flight_data, 1, function(x) all(is.na(x) | x == ""))
+num_empty_rows <- sum(empty_rows)
+
+print(paste("Number of completely empty rows:", num_empty_rows))
+
+if(num_empty_rows > 0) {
+  print("Empty row indices:")
+  print(which(empty_rows))
+} else {
+  print("No completely empty rows found")
+}
+
+# Check for rows with any NA values
+rows_with_na <- apply(flight_data, 1, function(x) any(is.na(x)))
+num_rows_with_na <- sum(rows_with_na)
+
+print(paste("Number of rows with any missing values:", num_rows_with_na))
+
+if(num_rows_with_na > 0) {
+  print("Rows with missing values:")
+  print(which(rows_with_na))
+  print("These rows contain NA:")
+  print(flight_data[rows_with_na, ])
+} else {
+  print("No rows with missing values found")
+}
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+##### Based on the results of the data checks, there are no missing data or empty rows in the dataset.
+ 
+- The data is ready for further analysis. 
+- In this data set column headers are values not, variable names. 
+- The columns airline and status can remain as is since they are names representing characteristics the data set measures.
+- The other columns should be renamed to represent the variable they measure. 
+
+##### Convert data to a long format for better data analysis
+```{r}
+library(tidyr)
+
+# Converting flight_data to a long format
+flight_data_long <- flight_data %>%
+  pivot_longer(
+    cols = los_angeles:seattle,         
+    names_to = "destination",          
+    values_to = "flight_count"        
+  )
+print(flight_data_long)
+```
+##### The data has been successfully converted to a long format. The columns los_angeles, phoenix, portland, san_francisco, and seattle have been pivoted into two new columns: destination and flight_count. The column headings are all variables and the values are in the rows. This format is more suitable for analysis and visualization.
+
+#### Count Analysis on Dataset using key functions from the dplyr package
+##### In the series of analysis below, I will perform various analyses on the flight performance data using dplyr functions such as group_by(), summarise(), filter(), and arrange(). Each analysis will focus on different aspects of the data, such as total flights, average flights, delayed flights, and on-time performance and will be supported where necessary with visualizations using ggplot2.
+
+## Analysis #1a: Total Number of Arrival Flights by City
+
+```{r}
+flight_data_long %>% 
+  group_by(destination) %>% 
+  summarise(
+    total_flights = sum(flight_count, na.rm = TRUE)
+    ) %>% 
+  arrange(desc(total_flights)) %>%
+ 
+  print()
+```
+## Analysis #1b: Graphical Representation of Total Number of Flights by City
+```{r}
+
+  flight_data_long %>% 
+  group_by(destination) %>% 
+  summarise(
+    total_flights = sum(flight_count, na.rm = TRUE)
+    ) %>% 
+  arrange(desc(total_flights)) %>%
+  ggplot(aes(x = destination, y = total_flights)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Total Flights by City",
+       x = "City",
+       y = "Total Flights") +
+  theme_minimal()
+```
+
+## Analysis #2a: Average Number of Flights by City, Across all Airlines and all Flight Status'
+
+*For each city, there are 4 records: one for on-time flights and one for delayed flights, across two airlines. The average sums these values divides by 4 for the 4 categories and give an average value per category.*
+```{r}
+flight_data_long %>% 
+  group_by(destination) %>% 
+  summarise(
+    average_flights = mean(flight_count, na.rm = TRUE)
+    ) %>% 
+  arrange(desc(average_flights)) %>%
+  print()
+```
+## Analysis #2b: Graphical Representation of the Average Number of Flights, Across all Airlines and all Flight Status'
+```{r}
+flight_data_long %>% 
+  group_by(destination) %>% 
+  summarise(
+    average_flights = mean(flight_count, na.rm = TRUE)
+    ) %>% 
+  arrange(desc(average_flights)) %>%
+  ggplot(aes(x = reorder(destination, average_flights), y = average_flights)) +
+  geom_col(fill = "darkgreen", alpha = 0.7) +
+  geom_text(aes(label = round(average_flights, 1)), hjust = -0.1) +
+  coord_flip() +
+  labs(title = "Average Flights by Destination",
+       x = "Destination",
+       y = "Average Flights") +
+  theme_classic()
+```
+
+## Analysis #3a: Percentage of Overall Delayed Flights for the Alaska and AMWEST Airlines
+
+*My approach to calculating the overall airline delay performance will be calculated in the following steps:*
+
+- Add all delayed flights across all cities and airlines
+
+- Add all total flights across all cities and airlines  
+
+- Divide delayed by total flights for percentage
+
+- Result shows network-wide delay rate
+
+- One number summarizes entire system performance
+
+```{r}
+overall_flight_percentage <- flight_data_long %>%
+  summarise(
+    total_delayed_flights = sum(flight_count[status == "delayed"], na.rm = TRUE),
+    total_all_flights = sum(flight_count, na.rm = TRUE),
+    overall_delay_rate = (total_delayed_flights / total_all_flights) * 100
+  ) %>%
+  print()
+```
+## Analysis #3b: Pie Chart: Flight Delays for the Alaska and AMWEST Airlines Across all Cities in the Dataset
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Calculate overall performance for Alaska
+alaska_overall <- flight_data_long %>%
+  filter(airline == "ALASKA") %>%
+  summarise(
+    total_delayed_flights = sum(flight_count[status == "delayed"], na.rm = TRUE),
+    total_all_flights = sum(flight_count, na.rm = TRUE),
+    overall_delay_rate = (total_delayed_flights / total_all_flights) * 100
+  )
+
+# Calculate overall performance for AmWest
+amwest_overall <- flight_data_long %>%
+  filter(airline == "AMWEST") %>%
+  summarise(
+    total_delayed_flights = sum(flight_count[status == "delayed"], na.rm = TRUE),
+    total_all_flights = sum(flight_count, na.rm = TRUE),
+    overall_delay_rate = (total_delayed_flights / total_all_flights) * 100
+  )
+```
+## Creating Pie Chart Data and Visualizations
+
+```{r}
+# Create Alaska pie chart data
+alaska_pie_data <- data.frame(
+  status = c("On Time", "Delayed"),
+  flights = c(alaska_overall$total_all_flights - alaska_overall$total_delayed_flights,
+              alaska_overall$total_delayed_flights),
+  percentage = c(100 - alaska_overall$overall_delay_rate,
+                 alaska_overall$overall_delay_rate)
+)
+
+# Create AmWest pie chart data
+amwest_pie_data <- data.frame(
+  status = c("On Time", "Delayed"),
+  flights = c(amwest_overall$total_all_flights - amwest_overall$total_delayed_flights,
+              amwest_overall$total_delayed_flights),
+  percentage = c(100 - amwest_overall$overall_delay_rate,
+                 amwest_overall$overall_delay_rate)
+)
+
+# Alaska Airlines Pie Chart
+ggplot(alaska_pie_data, aes(x = "", y = flights, fill = status)) +
+  geom_col(width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste0(status, "\n", round(percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), size = 4, fontface = "bold") +
+  labs(title = "Alaska Airlines - Flight Performance") +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none",
+    plot.margin = margin(30, 30, 30, 30, "pt")
+  ) +
+  scale_fill_manual(values = c("On Time" = "grey", "Delayed" = "orange"))
+
+# AmWest Airlines Pie Chart
+ggplot(amwest_pie_data, aes(x = "", y = flights, fill = status)) +
+  geom_col(width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste0(status, "\n", round(percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), size = 4, fontface = "bold") +
+  labs(title = "AmWest Airlines - Flight Performance") +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none",
+    plot.margin = margin(30, 30, 30, 30, "pt")
+  ) +
+  scale_fill_manual(values = c("On Time" = "grey", "Delayed" = "orange"))
+
+# Print summary statistics
+print("=== AIRLINE PERFORMANCE SUMMARY ===")
+print(paste("Alaska Airlines Delay Rate:", round(alaska_overall$overall_delay_rate, 1), "%"))
+print(paste("AmWest Airlines Delay Rate:", round(amwest_overall$overall_delay_rate, 1), "%"))
+```
+##Summary of Overall Flight Performance Analysis:
+
+*Both Alaska Airlines (13.3% delay rate) and AmWest Airlines (10.9% delay rate) maintained exceptionally low delay frequencies, with fewer than 15% of flights experiencing delays across their route networks.*
+
+*This consistently low delay performance across all five destinations—Los Angeles, Phoenix, San Diego, San Francisco, and Seattle—suggests both airlines have implemented operational strategies that effectively minimize disruptions. The sub-15% delay rates are particularly noteworthy in the airline industry, where delays can significantly impact passenger satisfaction, operational costs, and schedule reliability.*
+
+
+## Analysis #4a: My approach to finding the Percentage Flight Delay by City for the Alaska and AMWEST Airlines*
+- Find the sum of delays in each city.
+- Divide by the total flights in that city. 
+- Repeat this process for each city
+- I will plot these data in two separate graphs to better visualize the data.
+
+### Graph 1: Alaska delay % by city
+```{r}
+# Calculate Alaska delay percentage by city
+alaska_delays <- flight_data_long %>%
+  filter(airline == "ALASKA") %>%
+  group_by(destination) %>%
+  summarise(
+    delayed_flights = sum(flight_count[status == "delayed"], na.rm = TRUE),
+    total_flights = sum(flight_count, na.rm = TRUE),
+    delay_percentage = (delayed_flights / total_flights) * 100
+  ) %>%
+  arrange(desc(delay_percentage))
+
+# Create bar graph (FIXED - removed xlim)
+ggplot(alaska_delays, aes(x = reorder(destination, delay_percentage), y = delay_percentage)) +
+  geom_col(fill = "orange", alpha = 0.8) +
+  geom_text(aes(label = paste0(round(delay_percentage, 1), "%")), 
+            hjust = -0.1, size = 4) +
+  coord_flip() +
+  labs(
+    title = "Alaska Airlines: Delay Rate by City",
+    subtitle = "Percentage of delayed flights per destination",
+    x = "Destination City",
+    y = "Delay Rate (%)"
+  ) +
+  theme_minimal() +
+  ylim(0, max(alaska_delays$delay_percentage) * 1.1)  # Use ylim instead of xlim
+```
+*Alaska's delay rates varied significantly across destinations, ranging from 5.2% in Phoenix to 16.9% in San Francisco. San Francisco emerged as Alaska's most challenging route with the highest delay frequency, while Phoenix demonstrated the airline's best operational performance. This variation suggests that Alaska faces location-specific operational challenges, potentially related to airport infrastructure, weather patterns, or air traffic congestion at certain destinations.*
+
+### Graph 2: AMWest delay % by city
+```{r}
+# Calculate AmWest delay percentage by city
+amwest_delays <- flight_data_long %>%
+  filter(airline == "AMWEST") %>%
+  group_by(destination) %>%
+  summarise(
+    delayed_flights = sum(flight_count[status == "delayed"], na.rm = TRUE),
+    total_flights = sum(flight_count, na.rm = TRUE),
+    delay_percentage = (delayed_flights / total_flights) * 100
+  ) %>%
+  arrange(desc(delay_percentage))
+
+# Create bar graph
+ggplot(amwest_delays, aes(x = reorder(destination, delay_percentage), y = delay_percentage)) +
+  geom_col(fill = "purple", alpha = 0.8) +
+  geom_text(aes(label = paste0(round(delay_percentage, 1), "%")), 
+            hjust = -0.1, size = 4) +
+  coord_flip() +
+  labs(
+    title = "AmWest Airlines: Delay Rate by City",
+    subtitle = "Percentage of delayed flights per destination",
+    x = "Destination City",
+    y = "Delay Rate (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),      # Center title
+    plot.subtitle = element_text(hjust = 0.5),   # Center subtitle
+    axis.title.x = element_text(hjust = 0.5),    # Center x-axis label
+    axis.title.y = element_text(hjust = 0.5)     # Center y-axis label
+  ) +
+  ylim(0, max(amwest_delays$delay_percentage) * 1.1)
+```
+*AmWest's strongest performance was recorded in Phoenix, where optimal operational conditions—possibly including favorable weather patterns, efficient airport operations, or strategic scheduling—resulted in minimal delays. Conversely, San Francisco presented the greatest operational challenges, with higher delay rates likely attributed to factors such as  complex airspace management, or airport congestion, staffing and scheduling challenges.* 
+
+*Both AMWest and Alaska Airlines exhibited their highest delay rates in San Francisco, indicating that this destination poses significant operational challenges for both carriers. This commonality suggests that external factors specific to San Francisco, such as air traffic congestion, weather conditions, or airport infrastructure limitations, may be contributing to delays across different airlines.The both showed their lowest delay rates in Phoenix, indicating that this destination offers more favorable operational conditions for both carriers.*
+
+
+**Describe discrepancy between comparing two airlines’ flight performances city-by-city and overall.**
+*When comparing Alaska Airlines and AmWest's performance, the overall analysis shows AmWest as the superior airline with a 10.9% delay rate compared to Alaska's 13.3%. However, the city-by-city analysis reveals a more complex picture where Alaska outperforms AmWest in some destinations while AmWest excels in others. For example, Alaska may have significantly better performance in high-traffic routes like Los Angeles or Seattle, while AmWest dominates in Phoenix. This creates a discrepancy where the "better" airline depends entirely on which specific route passengers are considering, contradicting the overall ranking that suggests AmWest is universally superior.*
+
+**Key Analytical Differences:**
+
+- Overall analysis captures aggregate operational efficiency across the entire network
+- City-by-city analysis reveals localized operational competencies and route-specific strategic advantages
+- Measurement scope difference means an airline can simultaneously be the "worst" performer overall yet the "best" choice for specific destinations
+- Aggregated data obscures critical operational nuances that directly impact individual passenger experiences
+
+**Explanation of the discrepancy between comparing two airlines’ flight performances city-by-city and overall**
+
+This discrepancy occurs because overall performance averages mask individual route variations. AmWest's lower overall delay rate (10.9%) most likely results from their exceptional performance in specific cities—particularly high-volume routes where strong performance heavily influences the total. Meanwhile, Alaska's higher overall rate (13.3%) may be skewed by poor performance on a few challenging routes, even though they excel on others. Overall percentages weight all flights equally, so an airline with excellent performance on high-traffic routes will show better overall statistics, even if they struggle on smaller routes.
+
+Comparing the overall percentage of delays does not account for cities that can have extremely high delays nor does it account for events that can give extreme values such as snow storms, hurricanes, or other weather events. Even under staffing , plane maintenance, and air traffic control issues can cause delays that are not accounted for in the overall percentage. For example AWWest showed an average delay across all cities of 10.9% but the percent delay across cities showed values from 7.9% to 28.7&%. This is a significant difference that is not present in the overall percentage.
+
