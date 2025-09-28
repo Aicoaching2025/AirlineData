@@ -17,7 +17,7 @@ options(repos = c(CRAN = "https://cran.rstudio.com/"))
 - Each observation forms a row.
 - Each type of observational unit forms a table
 
-##### I will also create visializations to better enahnce data visulaization and understanding of the data.
+##### I will also create visualizations to better enahnce data visulaization and understanding of the data.
 
 ```{r}
 # Load libraries
@@ -147,7 +147,7 @@ flight_data_long <- flight_data %>%
   )
 print(flight_data_long)
 ```
-##### The data has been successfully converted to a long format. The columns los_angeles, phoenix, portland, san_francisco, and seattle have been pivoted into two new columns: destination and flight_count. The column headings are all variables and the values are in the rows. This format is more suitable for analysis and visualization.
+##### The data has been successfully converted to a long format. The columns los_angeles, phoenix, san_diego, san_francisco, and seattle have been pivoted into two new columns: destination and flight_count. The column headings are all variables and the values are in the rows. This format is more suitable for analysis and visualization.
 
 #### Count Analysis on Dataset using key functions from the dplyr package
 ##### In the series of analysis below, I will perform various analyses on the flight performance data using dplyr functions such as group_by(), summarise(), filter(), and arrange(). Each analysis will focus on different aspects of the data, such as total flights, average flights, delayed flights, and on-time performance and will be supported where necessary with visualizations using ggplot2.
